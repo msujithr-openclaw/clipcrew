@@ -18,8 +18,8 @@ export type RunInput = {
 };
 
 export type WorkflowStep = {
-  role: WorkflowRole;
-  status: WorkflowStatus;
+  role: WorkflowRole | string;
+  status: WorkflowStatus | string;
   order: number;
   inputSummary: string;
   outputSummary: string;
