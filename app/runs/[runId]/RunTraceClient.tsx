@@ -40,6 +40,7 @@ function LocalRunTrace({ runId }: { runId: string }) {
       status="awaiting_approval"
       steps={runDeterministicClipCrew(input)}
       title={input.title}
+      videoPublicUrl={input.video?.publicUrl}
     />
   );
 }
@@ -60,6 +61,10 @@ function ConvexRunTrace({ runId }: { runId: string }) {
   const convexRunId = runId as Id<"runs">;
   const run = useQuery(api.runs.getRun, { runId: convexRunId });
   const storedSteps = useQuery(api.workflow.listByRun, { runId: convexRunId });
+  const video = useQuery(
+    api.runs.getVideo,
+    run?.videoId ? { videoId: run.videoId } : "skip",
+  );
 
   if (run === undefined || storedSteps === undefined) {
     return <RunShell runId={runId} status="loading" title="Loading Convex run" />;
@@ -84,6 +89,7 @@ function ConvexRunTrace({ runId }: { runId: string }) {
       status={run.status}
       steps={steps}
       title={run.title}
+      videoPublicUrl={video?.publicUrl}
     />
   );
 }
@@ -95,6 +101,7 @@ function RunShell({
   status,
   steps = [],
   title,
+  videoPublicUrl,
 }: {
   episodeTitle?: string;
   runId: string;
@@ -102,6 +109,7 @@ function RunShell({
   status: string;
   steps?: WorkflowStep[];
   title: string;
+  videoPublicUrl?: string;
 }) {
   return (
     <section className="mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/30 sm:p-8">
@@ -126,6 +134,17 @@ function RunShell({
         </p>
         {source ? <p className="text-sm text-zinc-400">{source}</p> : null}
       </div>
+
+      {videoPublicUrl ? (
+        <a
+          className="mt-4 block break-all rounded-2xl border border-teal-300/20 bg-teal-300/10 p-4 text-sm text-teal-100 underline"
+          href={videoPublicUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {videoPublicUrl}
+        </a>
+      ) : null}
 
       {steps.length ? (
         <WorkflowTimeline steps={steps} />

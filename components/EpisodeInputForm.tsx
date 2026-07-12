@@ -67,8 +67,11 @@ function RunForm({
     "Why podcast clips need a story"
   );
   const [selectedVideo, setSelectedVideo] = useState<VideoMetadata | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   async function createRun(input: RunInput) {
     try {
@@ -98,16 +101,23 @@ function RunForm({
 
     if (!file) {
       setSelectedVideo(null);
+      setSelectedFile(null);
       return;
     }
 
     const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+    setSelectedFile(file);
+    setUploadProgress(0);
+    setUploadStatus("");
     setSelectedVideo({
       title: title.trim() || name || "Uploaded demo video",
       fileName: file.name,
       durationSeconds: 180,
       sourceType: "local_file_metadata",
       storageProvider: "local_demo",
+      contentType: file.type,
+      fileSize: file.size,
+      uploadStatus: "pending",
     });
   }
 
@@ -128,12 +138,36 @@ function RunForm({
       return;
     }
 
+    let video = selectedVideo;
+
+    if (selectedFile) {
+      try {
+        setUploadStatus("Requesting R2 upload URL...");
+        const uploaded = await uploadVideoToR2(selectedFile, setUploadProgress);
+        video = {
+          ...selectedVideo,
+          storageProvider: "r2",
+          r2Key: uploaded.key,
+          publicUrl: uploaded.publicUrl,
+          contentType: selectedFile.type,
+          fileSize: selectedFile.size,
+          uploadStatus: "uploaded",
+        };
+        setSelectedVideo(video);
+        setUploadStatus(`Uploaded to R2: ${uploaded.publicUrl}`);
+      } catch {
+        video = { ...selectedVideo, uploadStatus: "failed" };
+        setSelectedVideo(video);
+        setUploadStatus("R2 upload failed; continuing with local metadata.");
+      }
+    }
+
     const input: RunInput = {
       title: title.trim() || "Untitled Podcast",
       episodeTitle: episodeTitle.trim() || "Untitled Episode",
       sourceText: sampleTranscript,
-      sourceType: selectedVideo.sourceType,
-      video: selectedVideo,
+      sourceType: video.sourceType,
+      video,
     };
 
     await createRun(input);
@@ -192,7 +226,31 @@ function RunForm({
         {selectedVideo ? (
           <div className="rounded-2xl border border-teal-300/20 bg-teal-300/10 p-4 text-sm text-teal-50">
             Selected: {selectedVideo.fileName} · {selectedVideo.durationSeconds}s
-            placeholder · no file upload
+            placeholder
+            {selectedVideo.publicUrl ? (
+              <a
+                className="mt-2 block break-all text-teal-100 underline"
+                href={selectedVideo.publicUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {selectedVideo.publicUrl}
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
+        {uploadStatus ? (
+          <div className="rounded-2xl border border-white/10 bg-zinc-950/60 p-4 text-sm text-zinc-200">
+            <p>{uploadStatus}</p>
+            {uploadProgress > 0 ? (
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-teal-300 transition-all"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -236,4 +294,53 @@ function RunForm({
       </form>
     </section>
   );
+}
+
+async function uploadVideoToR2(
+  file: File,
+  onProgress: (progress: number) => void,
+) {
+  const presignResponse = await fetch("/api/r2-presign", {
+    body: JSON.stringify({
+      contentType: file.type,
+      filename: file.name,
+      size: file.size,
+    }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+
+  if (!presignResponse.ok) {
+    throw new Error("Could not create R2 upload URL");
+  }
+
+  const presign = (await presignResponse.json()) as {
+    uploadUrl: string;
+    key: string;
+    publicUrl: string;
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", presign.uploadUrl);
+    request.setRequestHeader("content-type", file.type);
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    request.onerror = () => reject(new Error("R2 upload failed"));
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        onProgress(100);
+        resolve();
+        return;
+      }
+
+      reject(new Error("R2 upload failed"));
+    };
+    request.send(file);
+  });
+
+  return presign;
 }
