@@ -61,6 +61,17 @@ export const listVideos = query({
   },
 });
 
+export const listRuns = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("runs")
+      .withIndex("by_createdAt")
+      .order("desc")
+      .take(50);
+  },
+});
+
 export const getRun = query({
   args: { runId: v.id("runs") },
   handler: async (ctx, args) => {

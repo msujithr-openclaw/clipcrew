@@ -5,6 +5,7 @@ import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { WorkflowTimeline } from "@/components/WorkflowTimeline";
+import { runStatusLabel } from "@/lib/workflow/labels";
 import type { WorkflowStep } from "@/lib/workflow/types";
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
@@ -17,7 +18,7 @@ export function RunTraceClient({ runId }: { runId: string }) {
       <RunShell
         runId={runId}
         status="missing_config"
-        title="Connect Convex before viewing runs"
+        title="App configuration required"
       />
     );
   }
@@ -42,11 +43,15 @@ function ConvexRunTrace({ runId }: { runId: string }) {
   );
 
   if (run === undefined || storedSteps === undefined) {
-    return <RunShell runId={runId} status="loading" title="Loading Convex run" />;
+    return (
+      <RunShell runId={runId} status="loading" title="Loading clip project" />
+    );
   }
 
   if (run === null) {
-    return <RunShell runId={runId} status="not_found" title="Run not found" />;
+    return (
+      <RunShell runId={runId} status="not_found" title="Clip project not found" />
+    );
   }
 
   return (
@@ -61,7 +66,6 @@ function ConvexRunTrace({ runId }: { runId: string }) {
       showCandidateClips
       showScoringWorker={run.status === "transcribed"}
       showTranscriptionWorker={run.status === "awaiting_transcription_worker"}
-      source="Convex workflow trace"
       status={run.status}
       steps={storedSteps}
       title={run.title}
@@ -79,7 +83,6 @@ function RunShell({
   showCandidateClips = false,
   showScoringWorker = false,
   showTranscriptionWorker = false,
-  source,
   status,
   steps = [],
   title,
@@ -96,7 +99,6 @@ function RunShell({
   showCandidateClips?: boolean;
   showScoringWorker?: boolean;
   showTranscriptionWorker?: boolean;
-  source?: string;
   status: string;
   steps?: WorkflowStep[];
   title: string;
@@ -126,7 +128,7 @@ function RunShell({
       });
 
       if (!response.ok) {
-        throw new Error("Could not start transcription worker.");
+        throw new Error("Could not start transcription.");
       }
 
       setWorkerStatus("Transcription started.");
@@ -134,7 +136,7 @@ function RunShell({
       setWorkerStatus(
         error instanceof Error
           ? error.message
-          : "Could not start transcription worker.",
+          : "Could not start transcription.",
       );
     } finally {
       setIsStartingWorker(false);
@@ -153,13 +155,13 @@ function RunShell({
       });
 
       if (!response.ok) {
-        throw new Error("Could not start scoring worker.");
+        throw new Error("Could not start finding moments.");
       }
 
       setScoringStatus("Finding clip ideas.");
     } catch (error) {
       setScoringStatus(
-        error instanceof Error ? error.message : "Could not start scoring worker.",
+        error instanceof Error ? error.message : "Could not start finding moments.",
       );
     } finally {
       setIsStartingScoring(false);
@@ -198,13 +200,13 @@ function RunShell({
       });
 
       if (!response.ok) {
-        throw new Error("Could not start render worker.");
+        throw new Error("Could not start the export.");
       }
 
-      setRenderStatus("Generating approved clips.");
+      setRenderStatus("Exporting your clips...");
     } catch (error) {
       setRenderStatus(
-        error instanceof Error ? error.message : "Could not start render worker.",
+        error instanceof Error ? error.message : "Could not start the export.",
       );
     } finally {
       setIsStartingRender(false);
@@ -216,7 +218,7 @@ function RunShell({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-400">
-            ClipCrew Run
+            Clip project
           </p>
           <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">
             {title}
@@ -226,7 +228,7 @@ function RunShell({
           ) : null}
         </div>
         <span className="rounded-full bg-zinc-950 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-white">
-          {status}
+          {runStatusLabel(status)}
         </span>
       </div>
 
@@ -245,7 +247,7 @@ function RunShell({
             Next action
           </p>
           <p className="mt-2 text-sm font-semibold text-amber-900">
-            This video needs local chunked transcription.
+            This episode is ready to be transcribed.
           </p>
           <button
             className="mt-4 w-full rounded-2xl bg-zinc-950 px-4 py-3 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
@@ -253,7 +255,7 @@ function RunShell({
             onClick={startTranscriptionWorker}
             type="button"
           >
-            {isStartingWorker ? "Starting..." : "Start Transcription"}
+            {isStartingWorker ? "Starting..." : "Transcribe episode"}
           </button>
           {workerStatus ? (
             <p className="mt-3 text-sm text-amber-900">{workerStatus}</p>
@@ -267,7 +269,7 @@ function RunShell({
             Next action
           </p>
           <p className="mt-2 text-sm font-semibold text-blue-950">
-            Transcript is ready. Find candidate reel moments next.
+            Transcript ready. Next: find the best moments.
           </p>
           <button
             className="mt-4 w-full rounded-2xl bg-zinc-950 px-4 py-3 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
@@ -275,7 +277,7 @@ function RunShell({
             onClick={startScoringWorker}
             type="button"
           >
-            {isStartingScoring ? "Finding ideas..." : "Find Clip Ideas"}
+            {isStartingScoring ? "Finding moments..." : "Find clip moments"}
           </button>
           {scoringStatus ? (
             <p className="mt-3 text-sm text-blue-950">{scoringStatus}</p>
@@ -283,8 +285,11 @@ function RunShell({
         </div>
       ) : null}
 
-      {videoPublicUrl && (hasCandidates || hasExports) ? (
-        <details className="mt-6 rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
+      {videoPublicUrl ? (
+        <details
+          className="mt-6 rounded-3xl border border-zinc-200 bg-zinc-50 p-4"
+          open={!hasCandidates && !hasExports}
+        >
           <summary className="cursor-pointer text-sm font-bold uppercase tracking-[0.16em] text-zinc-500">
             Source video
           </summary>
@@ -294,24 +299,6 @@ function RunShell({
             src={videoPublicUrl}
           />
         </details>
-      ) : null}
-
-      {videoPublicUrl && !hasCandidates && !hasExports ? (
-        <div className="mt-6 rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
-          <video
-            className="aspect-video w-full rounded-2xl bg-black object-cover"
-            controls
-            src={videoPublicUrl}
-          />
-          <a
-            className="mt-3 block break-all text-sm text-zinc-600 underline"
-            href={videoPublicUrl}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {videoPublicUrl}
-          </a>
-        </div>
       ) : null}
 
       {showCandidateClips ? (
@@ -330,21 +317,18 @@ function RunShell({
 
       <details className="mt-8 border-t border-zinc-200 pt-6">
         <summary className="cursor-pointer text-sm font-bold uppercase tracking-[0.16em] text-zinc-500">
-          Workflow trace
+          Behind the scenes
         </summary>
         {steps.length ? (
           <WorkflowTimeline steps={steps} />
         ) : (
           <p className="mt-4 rounded-2xl bg-zinc-50 p-5 text-zinc-500">
-            Workflow trace is not available yet.
+            The crew has not logged any steps yet.
           </p>
         )}
-        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-          <p className="break-all rounded-2xl bg-zinc-50 p-4 font-mono text-sm text-zinc-600">
-            {runId}
-          </p>
-          {source ? <p className="text-sm text-zinc-500">{source}</p> : null}
-        </div>
+        <p className="mt-4 break-all rounded-2xl bg-zinc-50 p-4 font-mono text-sm text-zinc-600">
+          {runId}
+        </p>
       </details>
     </section>
   );
@@ -369,17 +353,17 @@ function ProgressStrip({
       active: status === "awaiting_transcription_worker" || status === "running",
     },
     {
-      label: "Ideas",
+      label: "Moments",
       done: candidateCount > 0,
       active: status === "transcribed",
     },
     {
-      label: "Approval",
+      label: "Review",
       done: approvedCount > 0,
       active: candidateCount > 0 && approvedCount === 0,
     },
     {
-      label: "Exports",
+      label: "Export",
       done: exportCount > 0,
       active: approvedCount > 0 && exportCount === 0,
     },
@@ -479,15 +463,27 @@ function CandidateClips({
                   {receipt.hook}
                 </span>
                 <span className="mt-1 block text-sm text-zinc-500">
-                  Ready MP4 export · {receipt.status}
+                  Ready to publish
                 </span>
+                {receipt.caption ? (
+                  <span className="mt-2 block text-sm leading-5 text-zinc-600">
+                    {receipt.caption}
+                  </span>
+                ) : null}
+                {receipt.hashtags.length ? (
+                  <span className="mt-2 block text-xs font-semibold text-zinc-500">
+                    {receipt.hashtags
+                      .map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))
+                      .join(" ")}
+                  </span>
+                ) : null}
                 <a
                   className="mt-3 inline-block rounded-full bg-zinc-950 px-3 py-2 text-xs font-bold text-white"
                   href={receipt.artifactUrl}
                   rel="noreferrer"
                   target="_blank"
                 >
-                  Open MP4
+                  Download
                 </a>
               </article>
             ))}
@@ -498,10 +494,10 @@ function CandidateClips({
       {isRendering ? (
         <div className="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
-            Rendering
+            Exporting
           </p>
           <p className="mt-2 text-sm font-semibold text-emerald-950">
-            Generating approved clips.
+            Exporting your clips...
           </p>
         </div>
       ) : null}
@@ -521,7 +517,7 @@ function CandidateClips({
             onClick={onStartRender}
             type="button"
           >
-            {isStartingRender ? "Generating..." : "Generate Approved Clips"}
+            {isStartingRender ? "Exporting..." : "Export approved clips"}
           </button>
           {renderStatus ? (
             <p className="mt-3 text-sm text-emerald-950">{renderStatus}</p>
@@ -531,22 +527,32 @@ function CandidateClips({
 
       {candidateClips === undefined ? (
         <p className="mt-4 rounded-2xl bg-zinc-50 p-5 text-zinc-500">
-          Loading candidate clips...
+          Loading suggested clips...
         </p>
       ) : null}
 
       {candidateClips?.length === 0 ? (
         <p className="mt-4 rounded-2xl bg-zinc-50 p-5 text-zinc-500">
-          No candidate clips yet. Run scoring to generate review candidates.
+          No clip moments yet. Use &quot;Find clip moments&quot; above to get
+          suggestions to review.
         </p>
       ) : null}
 
       {candidateClips?.length ? (
         <div className="mt-4 grid gap-4">
-          {candidateClips.map((clip) => {
+          {[...candidateClips]
+            .sort((a, b) => b.totalScore - a.totalScore)
+            .map((clip) => {
             const isUpdating = updatingClipId === clip._id;
             const isApproved = clip.status === "approved";
             const isRejected = clip.status === "rejected";
+            const scoreBreakdown = [
+              { label: "Hook", value: clip.hook },
+              { label: "Clarity", value: clip.clarity },
+              { label: "Emotion", value: clip.emotion },
+              { label: "Novelty", value: clip.novelty },
+              { label: "Share", value: clip.shareability },
+            ];
 
             return (
               <article
@@ -563,15 +569,37 @@ function CandidateClips({
                     </h3>
                   </div>
                   <div className="text-right">
-                    <p className="text-3xl font-black">{clip.totalScore}</p>
+                    <p className="text-3xl font-black">
+                      {clip.totalScore}
+                      <span className="text-base font-bold text-zinc-400">/25</span>
+                    </p>
                     <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
                       Score
                     </p>
                   </div>
                 </div>
 
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {scoreBreakdown.map((score) => (
+                    <span
+                      className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-zinc-600"
+                      key={score.label}
+                    >
+                      {score.label} {score.value}/5
+                    </span>
+                  ))}
+                </div>
+
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] ${
+                      isApproved
+                        ? "bg-emerald-100 text-emerald-700"
+                        : isRejected
+                          ? "bg-rose-100 text-rose-700"
+                          : "bg-white text-zinc-500"
+                    }`}
+                  >
                     {clip.status}
                   </span>
                   <button
