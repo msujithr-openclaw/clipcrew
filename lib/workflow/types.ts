@@ -15,6 +15,15 @@ export type RunInput = {
   sourceType: string;
   sourceText: string;
   sourceUrl?: string;
+  video?: VideoMetadata;
+};
+
+export type VideoMetadata = {
+  title: string;
+  fileName: string;
+  durationSeconds: number;
+  sourceType: "sample_library" | "local_file_metadata";
+  storageProvider: "sample" | "local_demo";
 };
 
 export type WorkflowStep = {

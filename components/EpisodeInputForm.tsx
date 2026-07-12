@@ -2,10 +2,12 @@
 
 import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { sampleTranscript } from "@/lib/workflow/sampleTranscript";
-import type { RunInput } from "@/lib/workflow/types";
+import { runInputFromVideo, sampleVideos } from "@/lib/workflow/sampleVideos";
+import type { ChangeEvent, FormEvent } from "react";
+import type { RunInput, VideoMetadata } from "@/lib/workflow/types";
 
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
@@ -64,59 +66,99 @@ function RunForm({
   const [episodeTitle, setEpisodeTitle] = useState(
     "Why podcast clips need a story"
   );
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [transcript, setTranscript] = useState("");
+  const [selectedVideo, setSelectedVideo] = useState<VideoMetadata | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setIsSubmitting(true);
-
-    const sourceText = transcript.trim() || sampleTranscript;
-    const input: RunInput = {
-      title: title.trim() || "Untitled Podcast",
-      episodeTitle: episodeTitle.trim() || "Untitled Episode",
-      sourceUrl: sourceUrl.trim() || undefined,
-      sourceText,
-      sourceType: transcript.trim() ? "transcript" : "sample_transcript",
-    };
-
+  async function createRun(input: RunInput) {
     try {
       if (onCreateRun) {
         await onCreateRun(input);
         return;
       }
 
-      const localRunId = `local-${Date.now().toString(36)}`;
-      window.localStorage.setItem(`clipcrew:${localRunId}`, JSON.stringify(input));
-      router.push(`/runs/${localRunId}`);
+      createLocalRun(input);
     } catch {
       setError("Could not create the run. Using a local demo run instead.");
-      const localRunId = `local-${Date.now().toString(36)}`;
-      window.localStorage.setItem(`clipcrew:${localRunId}`, JSON.stringify(input));
-      router.push(`/runs/${localRunId}`);
+      createLocalRun(input);
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function createLocalRun(input: RunInput) {
+    const slug = input.video?.fileName ?? input.episodeTitle;
+    const localRunId = `local-${slug.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    window.localStorage.setItem(`clipcrew:${localRunId}`, JSON.stringify(input));
+    router.push(`/runs/${localRunId}`);
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setSelectedVideo(null);
+      return;
+    }
+
+    const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+    setSelectedVideo({
+      title: title.trim() || name || "Uploaded demo video",
+      fileName: file.name,
+      durationSeconds: 180,
+      sourceType: "local_file_metadata",
+      storageProvider: "local_demo",
+    });
+  }
+
+  async function handleSampleSelect(index: number) {
+    setError("");
+    setIsSubmitting(true);
+    await createRun(runInputFromVideo(sampleVideos[index]));
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    if (!selectedVideo) {
+      setError("Choose a local video file or select a sample library video.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const input: RunInput = {
+      title: title.trim() || "Untitled Podcast",
+      episodeTitle: episodeTitle.trim() || "Untitled Episode",
+      sourceText: sampleTranscript,
+      sourceType: selectedVideo.sourceType,
+      video: selectedVideo,
+    };
+
+    await createRun(input);
   }
 
   return (
     <section className="rounded-[2rem] border border-white/15 bg-white/[0.08] p-5 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-7">
       <div className="mb-6 space-y-2">
         <p className="text-sm font-semibold uppercase tracking-[0.3em] text-teal-200">
-          Generate Clip Plan
+          Upload or choose video
         </p>
-        <h2 className="text-2xl font-bold text-white">Start with an episode</h2>
+        <h2 className="text-2xl font-bold text-white">
+          Start from the video library
+        </h2>
         <p className="text-sm leading-6 text-zinc-300">
-          Paste a transcript or leave it empty to use the built-in demo sample.
+          Pick a sample video or choose a local file. The MVP stores metadata only,
+          then uses the demo transcript fallback for scoring.
         </p>
       </div>
 
       <form className="space-y-4" onSubmit={handleSubmit}>
         <label className="block space-y-2">
-          <span className="text-sm font-medium text-zinc-200">Show or podcast title</span>
+          <span className="text-sm font-medium text-zinc-200">
+            Show or creator title
+          </span>
           <input
             className="w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 py-3 text-white outline-none transition focus:border-teal-300"
             onChange={(event) => setTitle(event.target.value)}
@@ -125,7 +167,9 @@ function RunForm({
         </label>
 
         <label className="block space-y-2">
-          <span className="text-sm font-medium text-zinc-200">Episode title</span>
+          <span className="text-sm font-medium text-zinc-200">
+            Video or episode title
+          </span>
           <input
             className="w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 py-3 text-white outline-none transition focus:border-teal-300"
             onChange={(event) => setEpisodeTitle(event.target.value)}
@@ -134,47 +178,60 @@ function RunForm({
         </label>
 
         <label className="block space-y-2">
-          <span className="text-sm font-medium text-zinc-200">Optional source URL</span>
+          <span className="text-sm font-medium text-zinc-200">
+            Upload video metadata
+          </span>
           <input
-            className="w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 py-3 text-white outline-none transition focus:border-teal-300"
-            onChange={(event) => setSourceUrl(event.target.value)}
-            placeholder="https://youtube.com/watch?v=..."
-            type="url"
-            value={sourceUrl}
+            accept="video/*"
+            className="w-full rounded-2xl border border-dashed border-white/15 bg-zinc-950/70 px-4 py-4 text-sm text-zinc-200 file:mr-4 file:rounded-full file:border-0 file:bg-teal-300 file:px-4 file:py-2 file:text-sm file:font-bold file:text-zinc-950"
+            onChange={handleFileChange}
+            type="file"
           />
         </label>
 
-        <label className="block space-y-2">
-          <span className="text-sm font-medium text-zinc-200">Transcript</span>
-          <textarea
-            className="min-h-40 w-full resize-y rounded-2xl border border-white/10 bg-zinc-950/70 px-4 py-3 text-white outline-none transition placeholder:text-zinc-500 focus:border-teal-300"
-            onChange={(event) => setTranscript(event.target.value)}
-            placeholder="Paste transcript here, or use the sample transcript."
-            value={transcript}
-          />
-        </label>
+        {selectedVideo ? (
+          <div className="rounded-2xl border border-teal-300/20 bg-teal-300/10 p-4 text-sm text-teal-50">
+            Selected: {selectedVideo.fileName} · {selectedVideo.durationSeconds}s
+            placeholder · no file upload
+          </div>
+        ) : null}
+
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-zinc-200">Sample video library</p>
+          {sampleVideos.map((video, index) => (
+            <button
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.05] p-4 text-left transition hover:border-teal-300/50 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={isSubmitting}
+              key={video.fileName}
+              onClick={() => handleSampleSelect(index)}
+              type="button"
+            >
+              <span className="block font-bold text-white">
+                {video.episodeTitle}
+              </span>
+              <span className="mt-1 block text-sm text-zinc-400">
+                {video.fileName} · {Math.round(video.durationSeconds / 60)} min
+                sample
+              </span>
+            </button>
+          ))}
+        </div>
 
         <button
           className="w-full rounded-2xl bg-teal-300 px-5 py-4 text-base font-black text-zinc-950 transition hover:bg-teal-200 disabled:cursor-not-allowed disabled:opacity-70"
           disabled={isSubmitting}
           type="submit"
         >
-          {isSubmitting ? "Creating run..." : "Generate Clip Plan"}
-        </button>
-
-        <button
-          className="w-full rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-zinc-100 transition hover:bg-white/10"
-          onClick={() => setTranscript(sampleTranscript)}
-          type="button"
-        >
-          Use sample transcript
+          {isSubmitting
+            ? "Creating run..."
+            : "Generate Clip Plan from selected file"}
         </button>
 
         {error ? <p className="text-sm text-amber-200">{error}</p> : null}
         <p className="text-xs leading-5 text-zinc-400">
           {mode === "convex"
-            ? "Convex is configured; this creates a stored run."
-            : "Convex URL is not configured; this will create a local demo run id."}
+            ? "Convex is configured; this stores video metadata and creates a run."
+            : "Convex URL is not configured; this stores metadata in local demo state."}
         </p>
       </form>
     </section>
