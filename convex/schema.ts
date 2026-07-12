@@ -26,7 +26,17 @@ export default defineSchema({
     status: v.string(),
     createdAt: v.number(),
     completedAt: v.optional(v.number()),
-  }).index("by_createdAt", ["createdAt"]),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_video", ["videoId", "createdAt"]),
+
+  transcriptionChunks: defineTable({
+    runId: v.id("runs"),
+    chunkIndex: v.number(),
+    text: v.string(),
+    payload: v.any(),
+    createdAt: v.number(),
+  }).index("by_run", ["runId", "chunkIndex"]),
 
   workflowSteps: defineTable({
     runId: v.id("runs"),

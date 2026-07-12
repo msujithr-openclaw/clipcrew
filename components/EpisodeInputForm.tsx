@@ -9,7 +9,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import type { RunInput, VideoMetadata } from "@/lib/workflow/types";
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
-const tabs = ["Video Library", "Generate Clips", "Runs", "History"] as const;
+const tabs = ["Video Library", "Generate Clips"] as const;
 
 type Tab = (typeof tabs)[number];
 type StoredVideo = Doc<"videos">;
@@ -83,6 +83,7 @@ function RunForm({
 }: {
   onCreateRun: (input: RunInput) => Promise<void>;
 }) {
+  const router = useRouter();
   const addVideo = useMutation(api.runs.addVideo);
   const storedVideos = useQuery(api.runs.listVideos);
   const [activeTab, setActiveTab] = useState<Tab>("Video Library");
@@ -112,6 +113,10 @@ function RunForm({
   );
   const selectedVideo =
     videos.find((video) => video._id === selectedVideoId) ?? null;
+  const selectedVideoRuns = useQuery(
+    api.runs.listByVideo,
+    selectedVideoId ? { videoId: selectedVideoId } : "skip",
+  );
   const previewUrl = pendingUpload?.previewUrl ?? selectedVideo?.publicUrl ?? "";
 
   useEffect(() => {
@@ -413,82 +418,153 @@ function RunForm({
             onSubmit={handleSubmit}
           >
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-              Generate Clips
+              Video -&gt; Job -&gt; Review -&gt; Export
             </p>
             <h1 className="mt-2 text-3xl font-black tracking-tight">
               {selectedVideo
-                ? `Ready to score ${selectedVideo.fileName}`
-                : "Upload or select an R2 video first"}
+                ? "Create a clip-generation job"
+                : "Select an R2 video to start"}
             </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+              Select a stored R2 video, create or open a job, review suggested
+              clips, then export approved clips.
+            </p>
 
-            <div className="mt-6 grid gap-4 lg:grid-cols-2">
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-zinc-700">
-                  Show or creator title
-                </span>
-                <input
-                  className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 outline-none transition focus:border-zinc-950 focus:bg-white"
-                  onChange={(event) => setTitle(event.target.value)}
-                  value={title}
-                />
-              </label>
-
-              <label className="block space-y-2">
-                <span className="text-sm font-semibold text-zinc-700">
-                  Video or episode title
-                </span>
-                <input
-                  className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 outline-none transition focus:border-zinc-950 focus:bg-white"
-                  onChange={(event) => setEpisodeTitle(event.target.value)}
-                  value={episodeTitle}
-                />
-              </label>
+            <div className="mt-6 grid gap-3 md:grid-cols-4">
+              <div
+                className={`rounded-2xl border p-4 ${
+                  selectedVideo
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-zinc-200 bg-zinc-50"
+                }`}
+              >
+                <p className="text-sm font-black">1 Video</p>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {selectedVideo ? "R2 video selected" : "Choose a stored video"}
+                </p>
+              </div>
+              <div
+                className={`rounded-2xl border p-4 ${
+                  selectedVideo
+                    ? "border-zinc-950 bg-white"
+                    : "border-zinc-200 bg-zinc-50"
+                }`}
+              >
+                <p className="text-sm font-black">2 Job</p>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {isSubmitting ? "Creating Convex run" : "Create or open a job"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <p className="text-sm font-black">3 Review</p>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Approve suggested clips
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <p className="text-sm font-black">4 Export</p>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Generate approved clips
+                </p>
+              </div>
             </div>
 
-            <p className="mt-5 text-sm leading-6 text-zinc-500">
-              This creates a Convex run for the selected R2 video.
-            </p>
-            <button
-              className="mt-5 rounded-2xl bg-zinc-950 px-5 py-4 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSubmitting || isUploading || !selectedVideo}
-              type="submit"
-            >
-              {isUploading
-                ? "Uploading video..."
-                : isSubmitting
-                  ? "Creating run..."
-                  : "Generate Clip Plan"}
-            </button>
+            <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_360px]">
+              <div className="space-y-4">
+                {selectedVideo ? (
+                  <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
+                      1. Video
+                    </p>
+                    <p className="mt-3 text-xl font-black">{selectedVideo.title}</p>
+                    <p className="mt-1 break-all text-sm text-zinc-500">
+                      {selectedVideo.fileName}
+                    </p>
+                    <p className="mt-3 text-sm text-zinc-500">
+                      Stored in R2 and ready for job creation.
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="rounded-3xl border border-zinc-200 bg-white p-4">
+                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
+                    Existing jobs for this video
+                  </p>
+                  <div className="mt-4 grid gap-3">
+                    {selectedVideoRuns === undefined && selectedVideoId ? (
+                      <p className="text-sm text-zinc-500">Loading jobs...</p>
+                    ) : null}
+                    {selectedVideoRuns?.length === 0 ? (
+                      <p className="text-sm text-zinc-500">
+                        No jobs yet for this video.
+                      </p>
+                    ) : null}
+                    {selectedVideoRuns?.map((run) => (
+                      <button
+                        className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white"
+                        key={run._id}
+                        onClick={() => router.push(`/runs/${run._id}`)}
+                        type="button"
+                      >
+                        <span className="block font-black">{run.episodeTitle}</span>
+                        <span className="mt-1 block text-sm text-zinc-500">
+                          Open workflow · {run.status} ·{" "}
+                          {new Date(run.createdAt).toLocaleString()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-zinc-200 bg-white p-4">
+                <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
+                  2. Create job
+                </p>
+                <div className="mt-4 grid gap-4">
+                  <label className="block space-y-2">
+                    <span className="text-sm font-semibold text-zinc-700">
+                      Show or creator title
+                    </span>
+                    <input
+                      className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 outline-none transition focus:border-zinc-950 focus:bg-white"
+                      onChange={(event) => setTitle(event.target.value)}
+                      value={title}
+                    />
+                  </label>
+
+                  <label className="block space-y-2">
+                    <span className="text-sm font-semibold text-zinc-700">
+                      Job or episode title
+                    </span>
+                    <input
+                      className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 outline-none transition focus:border-zinc-950 focus:bg-white"
+                      onChange={(event) => setEpisodeTitle(event.target.value)}
+                      value={episodeTitle}
+                    />
+                  </label>
+
+                  <p className="text-sm leading-6 text-zinc-500">
+                    This creates a Convex run for the selected video and opens the
+                    job page for review and export.
+                  </p>
+                  <button
+                    className="rounded-2xl bg-zinc-950 px-5 py-4 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSubmitting || isUploading || !selectedVideo}
+                    type="submit"
+                  >
+                    {isUploading
+                      ? "Uploading video..."
+                      : isSubmitting
+                        ? "Creating job..."
+                        : "Create job & open workflow"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {error ? <p className="mt-4 text-sm text-amber-700">{error}</p> : null}
           </form>
-        ) : null}
-
-        {activeTab === "Runs" ? (
-          <section className="min-h-screen bg-white p-5 sm:p-7">
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-              Runs
-            </p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight">
-              Generated runs open on their trace page
-            </h1>
-            <p className="mt-4 text-sm leading-6 text-zinc-500">
-              Runs are created in Convex from selected R2 videos.
-            </p>
-          </section>
-        ) : null}
-
-        {activeTab === "History" ? (
-          <section className="min-h-screen bg-white p-5 sm:p-7">
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-              History
-            </p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight">
-              Convex stores generated runs
-            </h1>
-            <p className="mt-4 text-sm leading-6 text-zinc-500">
-              Open generated run URLs to revisit previous workflow traces.
-            </p>
-          </section>
         ) : null}
       </div>
     </div>
