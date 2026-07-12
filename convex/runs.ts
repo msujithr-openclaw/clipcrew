@@ -16,6 +16,11 @@ export const createRun = mutation({
         durationSeconds: v.number(),
         sourceType: v.string(),
         storageProvider: v.string(),
+        r2Key: v.optional(v.string()),
+        publicUrl: v.optional(v.string()),
+        contentType: v.optional(v.string()),
+        fileSize: v.optional(v.number()),
+        uploadStatus: v.optional(v.string()),
       }),
     ),
   },
@@ -48,6 +53,13 @@ export const getRun = query({
   args: { runId: v.id("runs") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.runId);
+  },
+});
+
+export const getVideo = query({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.videoId);
   },
 });
 

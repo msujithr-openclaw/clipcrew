@@ -23,7 +23,12 @@ export type VideoMetadata = {
   fileName: string;
   durationSeconds: number;
   sourceType: "sample_library" | "local_file_metadata";
-  storageProvider: "sample" | "local_demo";
+  storageProvider: "sample" | "local_demo" | "r2";
+  r2Key?: string;
+  publicUrl?: string;
+  contentType?: string;
+  fileSize?: number;
+  uploadStatus?: "pending" | "uploaded" | "failed";
 };
 
 export type WorkflowStep = {

@@ -8,6 +8,11 @@ export default defineSchema({
     durationSeconds: v.number(),
     sourceType: v.string(),
     storageProvider: v.string(),
+    r2Key: v.optional(v.string()),
+    publicUrl: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    fileSize: v.optional(v.number()),
+    uploadStatus: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_createdAt", ["createdAt"]),
 
