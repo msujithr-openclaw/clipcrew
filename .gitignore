@@ -11,6 +11,7 @@ dist/
 build/
 .next/
 .vercel/
+tsconfig.tsbuildinfo
 
 # media generated during tests
 outputs/

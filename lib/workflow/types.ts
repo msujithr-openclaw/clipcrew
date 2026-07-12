@@ -1,3 +1,5 @@
+import type { Id } from "@/convex/_generated/dataModel";
+
 export type WorkflowRole =
   | "producer"
   | "transcriber"
@@ -13,8 +15,9 @@ export type RunInput = {
   title: string;
   episodeTitle: string;
   sourceType: string;
-  sourceText: string;
+  sourceText?: string;
   sourceUrl?: string;
+  videoId: Id<"videos">;
   video?: VideoMetadata;
 };
 
@@ -22,8 +25,8 @@ export type VideoMetadata = {
   title: string;
   fileName: string;
   durationSeconds: number;
-  sourceType: "sample_library" | "local_file_metadata";
-  storageProvider: "sample" | "local_demo" | "r2";
+  sourceType: "r2_upload";
+  storageProvider: "r2";
   r2Key?: string;
   publicUrl?: string;
   contentType?: string;
