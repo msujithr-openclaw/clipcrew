@@ -1,6 +1,7 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { ConvexHttpClient } from "convex/browser";
 import ffmpegPath from "ffmpeg-static";
 import { api } from "../convex/_generated/api";
@@ -27,6 +28,13 @@ if (!ffmpegPath) {
 
 const convexDeploymentUrl = convexUrl;
 const ffmpegBin = ffmpegPath;
+const r2 = createR2Uploader();
+
+if (!r2) {
+  console.warn(
+    "R2 is not configured; export receipts will use local /exports URLs that only work on this machine.",
+  );
+}
 
 await renderApprovedRun(runId);
 
@@ -104,10 +112,14 @@ async function renderApprovedRun(targetRunId: Id<"runs">) {
         outputPath,
       ]);
 
+      const artifactUrl = r2
+        ? await r2.upload(`exports/${targetRunId}/${filename}`, outputPath)
+        : `/exports/${targetRunId}/${filename}`;
+
       await client.mutation(api.receipts.createReceipt, {
         runId: targetRunId,
         clipId: clip._id,
-        artifactUrl: `/exports/${targetRunId}/${filename}`,
+        artifactUrl,
         hook: clip.title,
         caption: clip.reason,
         hashtags: ["#podcast", "#shorts", "#clipcrew"],
@@ -142,6 +154,40 @@ async function renderApprovedRun(targetRunId: Id<"runs">) {
     });
     throw error;
   }
+}
+
+function createR2Uploader() {
+  const endpoint = process.env.R2_ENDPOINT;
+  const bucket = process.env.R2_BUCKET_NAME;
+  const publicBaseUrl = process.env.R2_PUBLIC_BASE_URL;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+
+  if (!endpoint || !bucket || !publicBaseUrl || !accessKeyId || !secretAccessKey) {
+    return null;
+  }
+
+  const client = new S3Client({
+    credentials: { accessKeyId, secretAccessKey },
+    endpoint,
+    forcePathStyle: true,
+    region: "auto",
+  });
+
+  return {
+    async upload(key: string, filePath: string) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: await readFile(filePath),
+          ContentType: "video/mp4",
+        }),
+      );
+
+      return `${publicBaseUrl.replace(/\/$/, "")}/${key}`;
+    },
+  };
 }
 
 async function runFfmpeg(args: string[]) {
