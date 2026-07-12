@@ -4,22 +4,9 @@ import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { api } from "@/convex/_generated/api";
+import { sampleTranscript } from "@/lib/workflow/sampleTranscript";
+import type { RunInput } from "@/lib/workflow/types";
 
-const sampleTranscript = `Host: Most podcast clips fail because creators pick the loudest moment, not the clearest story.
-
-Guest: The best clip has a hook, context, tension, and a payoff. If someone can understand it without the full episode, it can travel.
-
-Host: So the workflow should score for clarity and emotion, not just keywords.
-
-Guest: Exactly. A great social team would find the moments, explain why they work, write the caption, and let the creator approve before anything ships.`;
-
-type RunInput = {
-  title: string;
-  episodeTitle: string;
-  sourceUrl?: string;
-  sourceText: string;
-  sourceType: string;
-};
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
 
@@ -39,11 +26,30 @@ function ConvexRunForm() {
     <RunForm
       mode="convex"
       onCreateRun={async (input) => {
-        const runId = await createRun(input);
+        const runId = await withTimeout(createRun(input), 2500);
         router.push(`/runs/${runId}`);
       }}
     />
   );
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error("Convex run creation timed out")),
+      timeoutMs,
+    );
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function RunForm({
