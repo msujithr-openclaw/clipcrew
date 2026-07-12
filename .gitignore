@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.venv/
+
+# env
+.env
+.env.local
+
+# build outputs
+dist/
+build/
+.next/
+.vercel/
+
+# media generated during tests
+outputs/
+uploads/
+*.mp4
+*.mov
+*.mp3
+*.wav
+
+# logs
+*.log
+.DS_Store
