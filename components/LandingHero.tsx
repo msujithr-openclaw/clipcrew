@@ -20,8 +20,8 @@ export function LandingHero() {
           AI social media agency for podcasters.
         </h1>
         <p className="max-w-2xl text-lg leading-8 text-zinc-300 sm:text-xl">
-          Upload a video metadata stub or pick from the sample video library, then
-          watch a specialist crew find, score, caption, approve, and package clips.
+          Upload real videos to R2, then watch a specialist crew find, score,
+          caption, approve, and package clips.
         </p>
       </div>
 
@@ -40,8 +40,8 @@ export function LandingHero() {
       </div>
 
       <div className="rounded-3xl border border-purple-300/20 bg-purple-300/10 p-5 text-sm leading-6 text-purple-100">
-        Demo promise: video-library workflow first. R2 storage, real uploads, and
-        MP4 rendering stay out of the MVP path.
+        Video-library workflow first: R2 storage, Convex runs, and traceable
+        clip-planning steps.
       </div>
     </section>
   );

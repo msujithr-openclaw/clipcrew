@@ -1,4 +1,3 @@
-import { sampleTranscript } from "./sampleTranscript";
 import type { RunInput, WorkflowRole, WorkflowStep } from "./types";
 
 const roles: Array<{ role: WorkflowRole; label: string }> = [
@@ -12,9 +11,9 @@ const roles: Array<{ role: WorkflowRole; label: string }> = [
 ];
 
 export function runDeterministicClipCrew(input: RunInput): WorkflowStep[] {
-  const transcript = input.sourceText.trim() || sampleTranscript;
-  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
-  const sourceName = input.video?.fileName ?? input.episodeTitle;
+  const transcript = input.sourceText?.trim() ?? "";
+  const wordCount = transcript ? transcript.split(/\s+/).filter(Boolean).length : 0;
+  const sourceName = input.video?.fileName ?? input.sourceUrl ?? input.episodeTitle;
   const now = Date.now();
 
   const summaries: Record<WorkflowRole, { input: string; output: string }> = {
@@ -23,12 +22,12 @@ export function runDeterministicClipCrew(input: RunInput): WorkflowStep[] {
       output: "Validated video metadata and created a seven-role clip plan.",
     },
     transcriber: {
-      input:
-        input.sourceType === "sample_transcript" ||
-        input.sourceType === "local_video_metadata"
-          ? "Using built-in sample transcript for the selected demo video."
-          : "Using selected video library transcript as the source of truth.",
-      output: `Prepared transcript fallback with ${wordCount} words for scoring.`,
+      input: input.sourceUrl
+        ? `Queued transcription from R2 video ${input.sourceUrl}.`
+        : "Queued transcription from selected R2 video.",
+      output: wordCount
+        ? `Prepared transcript with ${wordCount} words for scoring.`
+        : "Transcript is pending for this R2 video.",
     },
     moment_scorer: {
       input: "Transcript with hook, clarity, emotion, novelty, and shareability rubric.",

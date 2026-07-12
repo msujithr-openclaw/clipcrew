@@ -1,22 +1,48 @@
 "use client";
 
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
-import { sampleTranscript } from "@/lib/workflow/sampleTranscript";
-import { sampleVideos } from "@/lib/workflow/sampleVideos";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { ChangeEvent, FormEvent } from "react";
 import type { RunInput, VideoMetadata } from "@/lib/workflow/types";
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
+const tabs = ["Video Library", "Generate Clips", "Runs", "History"] as const;
+
+type Tab = (typeof tabs)[number];
+type StoredVideo = Doc<"videos">;
+type PendingUpload = {
+  fileName: string;
+  fileSize: number;
+  previewUrl: string;
+};
 
 export function EpisodeInputForm() {
   if (!hasConvexUrl) {
-    return <RunForm mode="local" />;
+    return <SetupRequired />;
   }
 
   return <ConvexRunForm />;
+}
+
+function SetupRequired() {
+  return (
+    <section className="mx-auto max-w-3xl p-6">
+      <div className="rounded-[2rem] border border-zinc-200 bg-white p-7 shadow-sm">
+        <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
+          Setup required
+        </p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight">
+          Connect Convex before using ClipCrew
+        </h1>
+        <p className="mt-4 text-sm leading-6 text-zinc-500">
+          `NEXT_PUBLIC_CONVEX_URL` is required to create and view runs.
+        </p>
+      </div>
+    </section>
+  );
 }
 
 function ConvexRunForm() {
@@ -25,7 +51,6 @@ function ConvexRunForm() {
 
   return (
     <RunForm
-      mode="convex"
       onCreateRun={async (input) => {
         const runId = await withTimeout(createRun(input), 2500);
         router.push(`/runs/${runId}`);
@@ -54,97 +79,148 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 }
 
 function RunForm({
-  mode,
   onCreateRun,
 }: {
-  mode: "convex" | "local";
-  onCreateRun?: (input: RunInput) => Promise<void>;
+  onCreateRun: (input: RunInput) => Promise<void>;
 }) {
-  const router = useRouter();
-  const [title, setTitle] = useState("Creator Growth Show");
-  const [episodeTitle, setEpisodeTitle] = useState(
-    "Why podcast clips need a story",
+  const addVideo = useMutation(api.runs.addVideo);
+  const storedVideos = useQuery(api.runs.listVideos);
+  const [activeTab, setActiveTab] = useState<Tab>("Video Library");
+  const [title, setTitle] = useState("");
+  const [episodeTitle, setEpisodeTitle] = useState("");
+  const [selectedVideoId, setSelectedVideoId] = useState<Id<"videos"> | null>(
+    null,
   );
-  const [selectedVideo, setSelectedVideo] = useState<VideoMetadata | null>(
-    sampleVideos[0],
+  const [lastUploadedVideo, setLastUploadedVideo] = useState<StoredVideo | null>(
+    null,
   );
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [localPreviewUrl, setLocalPreviewUrl] = useState("");
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState("Ready: sample video selected");
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("Ready for R2 upload");
   const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadToken = useRef(0);
+
+  const videos = useMemo(
+    () =>
+      lastUploadedVideo &&
+      !storedVideos?.some((video) => video._id === lastUploadedVideo._id)
+        ? [lastUploadedVideo, ...(storedVideos ?? [])]
+        : (storedVideos ?? []),
+    [lastUploadedVideo, storedVideos],
+  );
+  const selectedVideo =
+    videos.find((video) => video._id === selectedVideoId) ?? null;
+  const previewUrl = pendingUpload?.previewUrl ?? selectedVideo?.publicUrl ?? "";
 
   useEffect(() => {
-    if (!localPreviewUrl) {
+    if (selectedVideoId || !videos[0]) {
       return;
     }
 
-    return () => URL.revokeObjectURL(localPreviewUrl);
-  }, [localPreviewUrl]);
+    selectVideo(videos[0]);
+  }, [selectedVideoId, videos]);
+
+  useEffect(() => {
+    if (!pendingUpload?.previewUrl) {
+      return;
+    }
+
+    return () => URL.revokeObjectURL(pendingUpload.previewUrl);
+  }, [pendingUpload?.previewUrl]);
+
+  function selectVideo(video: StoredVideo) {
+    setError("");
+    setSelectedVideoId(video._id);
+    setTitle(video.title);
+    setEpisodeTitle(video.fileName.replace(/\.[^.]+$/, ""));
+    setPendingUpload(null);
+    setUploadStatus("R2 video selected");
+    setUploadProgress(100);
+  }
 
   async function createRun(input: RunInput) {
     try {
-      if (onCreateRun) {
-        await onCreateRun(input);
-        return;
-      }
-
-      createLocalRun(input);
+      await onCreateRun(input);
     } catch {
-      setError("Could not create the run. Using a local demo run instead.");
-      createLocalRun(input);
+      setError("Could not create the Convex run.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  function createLocalRun(input: RunInput) {
-    const slug = input.video?.fileName ?? input.episodeTitle;
-    const localRunId = `local-${slug.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-    window.localStorage.setItem(`clipcrew:${localRunId}`, JSON.stringify(input));
-    router.push(`/runs/${localRunId}`);
-  }
-
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = "";
 
     if (!file) {
-      setSelectedVideo(sampleVideos[0]);
-      setSelectedFile(null);
-      setLocalPreviewUrl("");
-      setUploadStatus("Ready: sample video selected");
       return;
     }
 
+    const token = uploadToken.current + 1;
+    const previewUrl = URL.createObjectURL(file);
     const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
-    setSelectedFile(file);
-    setLocalPreviewUrl(URL.createObjectURL(file));
-    setUploadProgress(0);
-    setUploadStatus("Local file staged. R2 upload starts when you generate clips.");
-    setEpisodeTitle(name || "Uploaded demo video");
-    setSelectedVideo({
-      title: title.trim() || name || "Uploaded demo video",
-      fileName: file.name,
-      durationSeconds: 180,
-      sourceType: "local_file_metadata",
-      storageProvider: "local_demo",
-      contentType: file.type,
-      fileSize: file.size,
-      uploadStatus: "pending",
-    });
-  }
-
-  function handleSampleSelect(index: number) {
-    const video = sampleVideos[index];
+    uploadToken.current = token;
     setError("");
-    setSelectedFile(null);
-    setLocalPreviewUrl("");
-    setTitle(video.title);
-    setEpisodeTitle(video.episodeTitle);
-    setSelectedVideo(video);
+    setIsUploading(true);
     setUploadProgress(0);
-    setUploadStatus("Ready: sample video selected");
+    setUploadStatus("Uploading to R2...");
+    setPendingUpload({ fileName: file.name, fileSize: file.size, previewUrl });
+    setTitle((current) => current || name);
+    setEpisodeTitle(name || file.name);
+
+    try {
+      const [durationSeconds, uploaded] = await Promise.all([
+        readVideoDuration(previewUrl),
+        uploadVideoToR2(file, setUploadProgress),
+      ]);
+
+      if (uploadToken.current !== token) {
+        return;
+      }
+
+      const video = {
+        title: title.trim() || name || file.name,
+        fileName: file.name,
+        durationSeconds,
+        sourceType: "r2_upload",
+        storageProvider: "r2",
+        r2Key: uploaded.key,
+        publicUrl: uploaded.publicUrl,
+        contentType: file.type,
+        fileSize: file.size,
+        uploadStatus: "uploaded",
+      } satisfies VideoMetadata;
+      const videoId = await addVideo(video);
+
+      if (uploadToken.current !== token) {
+        return;
+      }
+
+      const storedVideo = {
+        ...video,
+        _id: videoId,
+        _creationTime: Date.now(),
+        createdAt: Date.now(),
+      } satisfies StoredVideo;
+      setLastUploadedVideo(storedVideo);
+      setSelectedVideoId(videoId);
+      setUploadStatus("Uploaded to R2 and saved to library");
+      setUploadProgress(100);
+      setPendingUpload(null);
+    } catch {
+      if (uploadToken.current !== token) {
+        return;
+      }
+
+      setError("R2 upload failed. Fix storage configuration and upload again.");
+      setUploadStatus("R2 upload failed");
+    } finally {
+      if (uploadToken.current === token) {
+        setIsUploading(false);
+      }
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -152,50 +228,30 @@ function RunForm({
     setError("");
     setIsSubmitting(true);
 
-    if (!selectedVideo) {
-      setError("Choose a local video file or select a sample library video.");
+    if (!selectedVideo || !selectedVideoId) {
+      setError("Upload or select an R2 video first.");
       setIsSubmitting(false);
       return;
     }
 
-    let video = selectedVideo;
-
-    if (selectedFile) {
-      try {
-        setUploadStatus("Requesting R2 upload URL...");
-        const uploaded = await uploadVideoToR2(selectedFile, setUploadProgress);
-        video = {
-          ...selectedVideo,
-          storageProvider: "r2",
-          r2Key: uploaded.key,
-          publicUrl: uploaded.publicUrl,
-          contentType: selectedFile.type,
-          fileSize: selectedFile.size,
-          uploadStatus: "uploaded",
-        };
-        setSelectedVideo(video);
-        setUploadStatus("Uploaded to R2. Creating run...");
-      } catch {
-        video = { ...selectedVideo, uploadStatus: "failed" };
-        setSelectedVideo(video);
-        setUploadStatus("R2 upload failed; continuing with local metadata.");
-      }
+    if (isUploading) {
+      setError("Wait for the R2 upload to finish before generating clips.");
+      setIsSubmitting(false);
+      return;
     }
 
     await createRun({
-      title: title.trim() || "Untitled Podcast",
-      episodeTitle: episodeTitle.trim() || "Untitled Episode",
-      sourceText: sampleTranscript,
-      sourceType: video.sourceType,
-      video,
+      title: title.trim() || selectedVideo.title,
+      episodeTitle: episodeTitle.trim() || selectedVideo.fileName,
+      sourceType: "r2_video",
+      sourceUrl: selectedVideo.publicUrl,
+      videoId: selectedVideoId,
     });
   }
 
-  const previewUrl = selectedVideo?.publicUrl ?? localPreviewUrl;
-
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 lg:flex-row lg:p-6">
-      <aside className="rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-sm lg:w-64">
+    <div className="flex min-h-screen w-full flex-col bg-white lg:flex-row">
+      <aside className="border-b border-zinc-200 bg-white p-5 lg:min-h-screen lg:w-72 lg:border-b-0 lg:border-r">
         <div className="mb-8">
           <p className="text-xl font-black tracking-tight">ClipCrew</p>
           <p className="mt-1 text-sm text-zinc-500">
@@ -203,46 +259,169 @@ function RunForm({
           </p>
         </div>
         <nav className="grid gap-2 text-sm font-semibold text-zinc-600">
-          {[
-            "Video Library",
-            "Generate Clips",
-            "Runs",
-            "History",
-          ].map((item, index) => (
-            <a
-              className={`rounded-2xl px-4 py-3 transition hover:bg-zinc-100 ${
-                index === 0 ? "bg-zinc-950 text-white" : ""
+          {tabs.map((tab) => (
+            <button
+              aria-pressed={activeTab === tab}
+              className={`rounded-2xl px-4 py-3 text-left transition hover:bg-zinc-100 ${
+                activeTab === tab ? "bg-zinc-950 text-white" : ""
               }`}
-              href={`#${item.toLowerCase().replace(/\s+/g, "-")}`}
-              key={item}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              type="button"
             >
-              {item}
-            </a>
+              {tab}
+            </button>
           ))}
         </nav>
       </aside>
 
-      <form className="flex-1 space-y-4" onSubmit={handleSubmit}>
-        <section
-          className="rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-sm sm:p-7"
-          id="video-library"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-                Video Library
-              </p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">
-                Select a video, generate clips.
-              </h1>
+      <div className="flex-1 bg-white">
+        {activeTab === "Video Library" ? (
+          <section className="min-h-screen bg-white p-5 sm:p-7">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
+                  Video Library
+                </p>
+                <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">
+                  R2 video gallery
+                </h1>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
+                Convex + R2
+              </span>
             </div>
-            <span className="rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
-              {mode === "convex" ? "Convex connected" : "Local fallback"}
-            </span>
-          </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="space-y-4">
+            <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_340px]">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="grid min-h-56 cursor-pointer place-items-center rounded-3xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center transition hover:border-zinc-500 hover:bg-white">
+                  <span>
+                    <span className="block text-4xl font-black text-zinc-950">+</span>
+                    <span className="mt-3 block text-sm font-black">
+                      Add video
+                    </span>
+                    <span className="mt-1 block text-sm text-zinc-500">
+                      Uploads to R2 and saves to Convex.
+                    </span>
+                  </span>
+                  <input
+                    accept="video/*"
+                    className="sr-only"
+                    onChange={handleFileChange}
+                    type="file"
+                  />
+                </label>
+
+                {pendingUpload ? (
+                  <div className="min-h-56 rounded-3xl border border-zinc-950 bg-zinc-950 p-4 text-left text-white">
+                    <video
+                      className="aspect-video w-full rounded-2xl bg-black object-cover"
+                      muted
+                      src={pendingUpload.previewUrl}
+                    />
+                    <p className="mt-3 font-black">{pendingUpload.fileName}</p>
+                    <p className="mt-2 text-sm opacity-70">
+                      {Math.round(pendingUpload.fileSize / 1024 / 1024)} MB
+                    </p>
+                  </div>
+                ) : null}
+
+                {storedVideos === undefined ? (
+                  <p className="rounded-3xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
+                    Loading videos...
+                  </p>
+                ) : null}
+
+                {videos.map((video) => {
+                  const active = selectedVideoId === video._id;
+
+                  return (
+                    <button
+                      className={`min-h-56 rounded-3xl border p-4 text-left transition ${
+                        active
+                          ? "border-zinc-950 bg-zinc-950 text-white"
+                          : "border-zinc-200 bg-white hover:border-zinc-400"
+                      }`}
+                      disabled={isSubmitting || isUploading}
+                      key={video._id}
+                      onClick={() => selectVideo(video)}
+                      type="button"
+                    >
+                      <span className="grid aspect-video place-items-center overflow-hidden rounded-2xl bg-zinc-100">
+                        <video
+                          className="size-full object-cover"
+                          muted
+                          src={video.publicUrl}
+                        />
+                      </span>
+                      <span className="mt-3 block font-black">{video.title}</span>
+                      <span className="mt-2 block text-sm opacity-70">
+                        {video.fileName} · {Math.round(video.durationSeconds / 60)} min
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-3xl bg-zinc-950 p-4 text-white">
+                {previewUrl ? (
+                  <video
+                    className="aspect-video w-full rounded-2xl bg-black object-cover"
+                    controls
+                    src={previewUrl}
+                  />
+                ) : (
+                  <div className="grid aspect-video place-items-center rounded-2xl bg-zinc-900 p-6 text-center">
+                    <div>
+                      <p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-400">
+                        Selected
+                      </p>
+                      <p className="mt-3 text-2xl font-black">No video selected</p>
+                    </div>
+                  </div>
+                )}
+                <p className="mt-4 font-bold">
+                  {selectedVideo?.title ?? pendingUpload?.fileName ?? "Add a video"}
+                </p>
+                <p className="mt-1 break-all text-sm text-zinc-400">
+                  {selectedVideo?.publicUrl ?? "Upload a video to store it in R2"}
+                </p>
+                <div className="mt-4 border-t border-white/10 pt-4">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-semibold">Upload status</span>
+                    <span className="text-zinc-400">{uploadProgress}%</span>
+                  </div>
+                  <p className="mt-2 break-all text-sm text-zinc-400">
+                    {uploadStatus}
+                  </p>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-white transition-all"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            {error ? <p className="mt-4 text-sm text-amber-700">{error}</p> : null}
+          </section>
+        ) : null}
+
+        {activeTab === "Generate Clips" ? (
+          <form
+            className="min-h-screen bg-white p-5 sm:p-7"
+            onSubmit={handleSubmit}
+          >
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
+              Generate Clips
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight">
+              {selectedVideo
+                ? `Ready to score ${selectedVideo.fileName}`
+                : "Upload or select an R2 video first"}
+            </h1>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-zinc-700">
                   Show or creator title
@@ -264,164 +443,54 @@ function RunForm({
                   value={episodeTitle}
                 />
               </label>
-
-              <label className="block rounded-3xl border border-dashed border-zinc-300 bg-zinc-50 p-5">
-                <span className="block text-sm font-semibold text-zinc-700">
-                  Upload new video
-                </span>
-                <span className="mt-1 block text-sm text-zinc-500">
-                  Upload lives in Video Library. R2 starts when you generate.
-                </span>
-                <input
-                  accept="video/*"
-                  className="mt-4 w-full text-sm text-zinc-600 file:mr-4 file:rounded-full file:border-0 file:bg-zinc-950 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white"
-                  onChange={handleFileChange}
-                  type="file"
-                />
-              </label>
-
-              <div className="rounded-3xl border border-zinc-200 bg-white p-4">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-semibold text-zinc-700">R2 upload status</span>
-                  <span className="text-zinc-500">{uploadProgress}%</span>
-                </div>
-                <p className="mt-2 break-all text-sm text-zinc-500">{uploadStatus}</p>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100">
-                  <div
-                    className="h-full rounded-full bg-zinc-950 transition-all"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-              </div>
             </div>
 
-            <div className="rounded-3xl bg-zinc-950 p-4 text-white">
-              {previewUrl ? (
-                <video
-                  className="aspect-video w-full rounded-2xl bg-black object-cover"
-                  controls
-                  src={previewUrl}
-                />
-              ) : (
-                <div className="grid aspect-video place-items-center rounded-2xl bg-[radial-gradient(circle_at_30%_20%,#facc15,transparent_30%),linear-gradient(135deg,#18181b,#3f3f46)] p-6 text-center">
-                  <div>
-                    <p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-300">
-                      Sample preview
-                    </p>
-                    <p className="mt-3 text-2xl font-black">
-                      {selectedVideo?.fileName ?? "No video selected"}
-                    </p>
-                  </div>
-                </div>
-              )}
-              <div className="mt-4">
-                <p className="font-bold">{episodeTitle}</p>
-                <p className="mt-1 text-sm text-zinc-400">
-                  {selectedVideo
-                    ? `${selectedVideo.fileName} · ${Math.round(
-                        selectedVideo.durationSeconds / 60,
-                      )} min`
-                    : "Select or upload a video"}
-                </p>
-                {selectedVideo?.publicUrl ? (
-                  <a
-                    className="mt-3 block break-all text-sm text-zinc-300 underline"
-                    href={selectedVideo.publicUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {selectedVideo.publicUrl}
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            {sampleVideos.map((video, index) => {
-              const active = selectedVideo?.fileName === video.fileName;
-
-              return (
-                <button
-                  className={`rounded-3xl border p-4 text-left transition ${
-                    active
-                      ? "border-zinc-950 bg-zinc-950 text-white"
-                      : "border-zinc-200 bg-zinc-50 hover:border-zinc-400"
-                  }`}
-                  disabled={isSubmitting}
-                  key={video.fileName}
-                  onClick={() => handleSampleSelect(index)}
-                  type="button"
-                >
-                  <span className="block text-xs font-bold uppercase tracking-[0.18em] opacity-60">
-                    Sample video
-                  </span>
-                  <span className="mt-3 block font-black">{video.episodeTitle}</span>
-                  <span className="mt-2 block text-sm opacity-70">
-                    {video.fileName} · {Math.round(video.durationSeconds / 60)} min
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section
-          className="grid gap-4 lg:grid-cols-[1fr_0.8fr]"
-          id="generate-clips"
-        >
-          <div className="rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-sm sm:p-7">
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-              Generate Clips
+            <p className="mt-5 text-sm leading-6 text-zinc-500">
+              This creates a Convex run for the selected R2 video.
             </p>
-            {selectedVideo ? (
-              <>
-                <h2 className="mt-2 text-2xl font-black tracking-tight">
-                  Ready to score {selectedVideo.fileName}
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-500">
-                  This creates the Convex/local run and keeps using the sample
-                  transcript fallback for the workflow trace.
-                </p>
-                <button
-                  className="mt-5 rounded-2xl bg-zinc-950 px-5 py-4 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSubmitting}
-                  type="submit"
-                >
-                  {isSubmitting ? "Creating run..." : "Generate Clip Plan"}
-                </button>
-              </>
-            ) : (
-              <p className="mt-2 text-sm text-zinc-500">
-                Select a sample video or upload a local file first.
-              </p>
-            )}
-            {error ? <p className="mt-4 text-sm text-amber-700">{error}</p> : null}
-          </div>
-
-          <div className="grid gap-4" id="runs">
-            <div className="rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-                Runs
-              </p>
-              <p className="mt-3 text-sm text-zinc-500">
-                New runs open on their trace page after generation.
-              </p>
-            </div>
-            <div
-              className="rounded-[2rem] border border-zinc-200 bg-white p-5 shadow-sm"
-              id="history"
+            <button
+              className="mt-5 rounded-2xl bg-zinc-950 px-5 py-4 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isSubmitting || isUploading || !selectedVideo}
+              type="submit"
             >
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-                History
-              </p>
-              <p className="mt-3 text-sm text-zinc-500">
-                Demo history stays minimal for now: use generated run URLs.
-              </p>
-            </div>
-          </div>
-        </section>
-      </form>
+              {isUploading
+                ? "Uploading video..."
+                : isSubmitting
+                  ? "Creating run..."
+                  : "Generate Clip Plan"}
+            </button>
+            {error ? <p className="mt-4 text-sm text-amber-700">{error}</p> : null}
+          </form>
+        ) : null}
+
+        {activeTab === "Runs" ? (
+          <section className="min-h-screen bg-white p-5 sm:p-7">
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
+              Runs
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight">
+              Generated runs open on their trace page
+            </h1>
+            <p className="mt-4 text-sm leading-6 text-zinc-500">
+              Runs are created in Convex from selected R2 videos.
+            </p>
+          </section>
+        ) : null}
+
+        {activeTab === "History" ? (
+          <section className="min-h-screen bg-white p-5 sm:p-7">
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
+              History
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight">
+              Convex stores generated runs
+            </h1>
+            <p className="mt-4 text-sm leading-6 text-zinc-500">
+              Open generated run URLs to revisit previous workflow traces.
+            </p>
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -473,4 +542,14 @@ async function uploadVideoToR2(
   });
 
   return presign;
+}
+
+async function readVideoDuration(previewUrl: string) {
+  return await new Promise<number>((resolve) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => resolve(Math.round(video.duration) || 0);
+    video.onerror = () => resolve(0);
+    video.src = previewUrl;
+  });
 }

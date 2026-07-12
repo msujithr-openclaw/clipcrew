@@ -1,60 +1,25 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import { useSyncExternalStore } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { WorkflowTimeline } from "@/components/WorkflowTimeline";
-import { runDeterministicClipCrew } from "@/lib/workflow/runClipCrew";
-import { sampleTranscript } from "@/lib/workflow/sampleTranscript";
-import type { RunInput, WorkflowStep } from "@/lib/workflow/types";
+import type { WorkflowStep } from "@/lib/workflow/types";
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
 
 export function RunTraceClient({ runId }: { runId: string }) {
-  if (runId.startsWith("local-") || !hasConvexUrl) {
-    return <LocalRunTrace runId={runId} />;
+  if (!hasConvexUrl) {
+    return (
+      <RunShell
+        runId={runId}
+        status="missing_config"
+        title="Connect Convex before viewing runs"
+      />
+    );
   }
 
   return <ConvexRunTrace runId={runId} />;
-}
-
-function LocalRunTrace({ runId }: { runId: string }) {
-  const storedRun = useSyncExternalStore(
-    () => () => {},
-    () => window.localStorage.getItem(`clipcrew:${runId}`),
-    () => null,
-  );
-  const input = parseRunInput(storedRun) ?? {
-      title: "Creator Growth Show",
-      episodeTitle: "Why podcast clips need a story",
-      sourceType: "sample_transcript",
-      sourceText: sampleTranscript,
-    };
-
-  return (
-    <RunShell
-      episodeTitle={input.episodeTitle}
-      runId={runId}
-      source="Local deterministic workflow"
-      status="awaiting_approval"
-      steps={runDeterministicClipCrew(input)}
-      title={input.title}
-      videoPublicUrl={input.video?.publicUrl}
-    />
-  );
-}
-
-function parseRunInput(value: string | null): RunInput | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
 }
 
 function ConvexRunTrace({ runId }: { runId: string }) {
@@ -74,20 +39,13 @@ function ConvexRunTrace({ runId }: { runId: string }) {
     return <RunShell runId={runId} status="not_found" title="Run not found" />;
   }
 
-  const fallbackSteps = runDeterministicClipCrew(run);
-  const steps = storedSteps.length ? storedSteps : fallbackSteps;
-
   return (
     <RunShell
       episodeTitle={run.episodeTitle}
       runId={runId}
-      source={
-        storedSteps.length
-          ? "Convex workflow trace"
-          : "Deterministic preview while Convex action deploys"
-      }
+      source="Convex workflow trace"
       status={run.status}
-      steps={steps}
+      steps={storedSteps}
       title={run.title}
       videoPublicUrl={video?.publicUrl}
     />

@@ -19,7 +19,7 @@ export default defineSchema({
   runs: defineTable({
     title: v.string(),
     episodeTitle: v.string(),
-    videoId: v.optional(v.id("videos")),
+    videoId: v.id("videos"),
     sourceType: v.string(),
     sourceText: v.string(),
     sourceUrl: v.optional(v.string()),
