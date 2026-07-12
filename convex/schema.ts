@@ -2,9 +2,19 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  videos: defineTable({
+    title: v.string(),
+    fileName: v.string(),
+    durationSeconds: v.number(),
+    sourceType: v.string(),
+    storageProvider: v.string(),
+    createdAt: v.number(),
+  }).index("by_createdAt", ["createdAt"]),
+
   runs: defineTable({
     title: v.string(),
     episodeTitle: v.string(),
+    videoId: v.optional(v.id("videos")),
     sourceType: v.string(),
     sourceText: v.string(),
     sourceUrl: v.optional(v.string()),

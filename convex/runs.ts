@@ -9,11 +9,28 @@ export const createRun = mutation({
     sourceType: v.optional(v.string()),
     sourceText: v.optional(v.string()),
     sourceUrl: v.optional(v.string()),
+    video: v.optional(
+      v.object({
+        title: v.string(),
+        fileName: v.string(),
+        durationSeconds: v.number(),
+        sourceType: v.string(),
+        storageProvider: v.string(),
+      }),
+    ),
   },
   handler: async (ctx, args) => {
+    const videoId = args.video
+      ? await ctx.db.insert("videos", {
+          ...args.video,
+          createdAt: Date.now(),
+        })
+      : undefined;
+
     const runId = await ctx.db.insert("runs", {
       title: args.title,
       episodeTitle: args.episodeTitle,
+      videoId,
       sourceType: args.sourceType ?? "transcript",
       sourceText: args.sourceText ?? "",
       sourceUrl: args.sourceUrl,

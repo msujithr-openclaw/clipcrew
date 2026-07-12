@@ -14,18 +14,20 @@ const roles: Array<{ role: WorkflowRole; label: string }> = [
 export function runDeterministicClipCrew(input: RunInput): WorkflowStep[] {
   const transcript = input.sourceText.trim() || sampleTranscript;
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+  const sourceName = input.video?.fileName ?? input.episodeTitle;
   const now = Date.now();
 
   const summaries: Record<WorkflowRole, { input: string; output: string }> = {
     producer: {
-      input: `${input.title} - ${input.episodeTitle}`,
-      output: "Validated episode input and created a seven-role clip plan.",
+      input: `${input.title} - ${sourceName}`,
+      output: "Validated video metadata and created a seven-role clip plan.",
     },
     transcriber: {
       input:
-        input.sourceType === "sample_transcript"
-          ? "No transcript pasted; using built-in sample transcript."
-          : "Using pasted transcript as the source of truth.",
+        input.sourceType === "sample_transcript" ||
+        input.sourceType === "local_video_metadata"
+          ? "Using built-in sample transcript for the selected demo video."
+          : "Using selected video library transcript as the source of truth.",
       output: `Prepared transcript fallback with ${wordCount} words for scoring.`,
     },
     moment_scorer: {
