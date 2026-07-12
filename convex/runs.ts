@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { api } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 
 export const createRun = mutation({
@@ -10,7 +11,7 @@ export const createRun = mutation({
     sourceUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("runs", {
+    const runId = await ctx.db.insert("runs", {
       title: args.title,
       episodeTitle: args.episodeTitle,
       sourceType: args.sourceType ?? "transcript",
@@ -19,6 +20,10 @@ export const createRun = mutation({
       status: "created",
       createdAt: Date.now(),
     });
+
+    await ctx.scheduler.runAfter(0, api.actions.runClipCrew, { runId });
+
+    return runId;
   },
 });
 
