@@ -6,7 +6,7 @@ ClipCrew
 
 ## One-liner
 
-An AI social media agency for podcasters: upload an episode and a Hermes agent crew finds, scores, cuts, captions, and prepares viral short clips.
+An AI social media agency for podcasters: upload an episode and an agentic workflow finds, scores, cuts, captions, and prepares viral short clips.
 
 ## Target user
 
@@ -38,18 +38,26 @@ A good podcast clip is not just an interesting timestamp. It needs a narrative a
 
 The product should behave like a social media agency, not a dumb clipper.
 
+## Important product boundary
+
+Hermes is the build partner, not the product runtime.
+
+ClipCrew should not depend on Hermes agents being embedded in the app. The product should implement its own workflow orchestration using LangGraph/LangChain-style nodes, custom workers, or another lightweight orchestrator.
+
+This keeps the product easy to deploy, explain, and demo while still satisfying hackathon eligibility through Hermes coding-partner receipts.
+
 ## Core workflow
 
 ```text
 Episode input
-  -> Producer / Manager agent
-  -> Transcript agent
-  -> Moment scorer
-  -> Hook judge panel
-  -> Parallel clip cutters
-  -> Caption writer
+  -> Producer / Manager node
+  -> Transcript node
+  -> Moment scorer node
+  -> Hook judge panel node
+  -> Parallel clip cutter nodes
+  -> Caption writer node
   -> Creator approval page
-  -> Publisher / exporter
+  -> Publisher / exporter node
   -> Run log + learning loop
 ```
 
@@ -67,10 +75,13 @@ Each candidate moment should be scored on:
 
 ## MVP success definition
 
-By demo time, a judge should be able to see one podcast episode produce at least one real captioned short clip with a visible agent trace and approval/export flow.
+By demo time, a judge should be able to see one podcast episode produce at least one real captioned short clip with a visible trace and approval/export flow.
+
+The trace should make the workflow look like an agency crew: separate roles, handoffs, scoring, rejection reasons, and final receipts.
 
 ## Non-goals for v1
 
+- embedding Hermes as the app runtime
 - full video editor
 - perfect automatic speaker cropping
 - deep analytics retraining
