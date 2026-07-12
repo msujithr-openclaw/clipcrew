@@ -34,3 +34,17 @@ export const createReceipt = mutation({
     });
   },
 });
+
+export const clearByRun = mutation({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    const receipts = await ctx.db
+      .query("exportReceipts")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+
+    for (const receipt of receipts) {
+      await ctx.db.delete(receipt._id);
+    }
+  },
+});

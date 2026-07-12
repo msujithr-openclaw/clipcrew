@@ -50,6 +50,20 @@ export const addMany = mutation({
   },
 });
 
+export const clearByRun = mutation({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    const clips = await ctx.db
+      .query("candidateClips")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+
+    for (const clip of clips) {
+      await ctx.db.delete(clip._id);
+    }
+  },
+});
+
 export const updateStatus = mutation({
   args: {
     clipId: v.id("candidateClips"),

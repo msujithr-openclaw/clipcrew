@@ -68,10 +68,31 @@ export const getRun = query({
   },
 });
 
+export const listByVideo = query({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("runs")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .order("desc")
+      .take(50);
+  },
+});
+
 export const getVideo = query({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.videoId);
+  },
+});
+
+export const listTranscriptionChunks = query({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("transcriptionChunks")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
   },
 });
 
@@ -86,5 +107,45 @@ export const updateRunStatus = mutation({
       status: args.status,
       completedAt: args.completedAt,
     });
+  },
+});
+
+export const updateRunTranscript = mutation({
+  args: {
+    runId: v.id("runs"),
+    sourceText: v.string(),
+    sourceType: v.string(),
+    chunks: v.array(
+      v.object({
+        chunkIndex: v.number(),
+        text: v.string(),
+        payload: v.any(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.runId, {
+      sourceText: args.sourceText,
+      sourceType: args.sourceType,
+    });
+
+    const existingChunks = await ctx.db
+      .query("transcriptionChunks")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+
+    for (const chunk of existingChunks) {
+      await ctx.db.delete(chunk._id);
+    }
+
+    for (const chunk of args.chunks) {
+      await ctx.db.insert("transcriptionChunks", {
+        runId: args.runId,
+        chunkIndex: chunk.chunkIndex,
+        text: chunk.text,
+        payload: chunk.payload,
+        createdAt: Date.now(),
+      });
+    }
   },
 });

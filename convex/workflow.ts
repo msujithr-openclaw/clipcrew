@@ -33,6 +33,20 @@ export const addStep = mutation({
   },
 });
 
+export const clearByRun = mutation({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    const steps = await ctx.db
+      .query("workflowSteps")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+
+    for (const step of steps) {
+      await ctx.db.delete(step._id);
+    }
+  },
+});
+
 export const updateStep = mutation({
   args: {
     stepId: v.id("workflowSteps"),

@@ -12,7 +12,12 @@ const roles: Array<{ role: WorkflowRole; label: string }> = [
 
 export function runDeterministicClipCrew(input: RunInput): WorkflowStep[] {
   const transcript = input.sourceText?.trim() ?? "";
-  const wordCount = transcript ? transcript.split(/\s+/).filter(Boolean).length : 0;
+
+  if (!transcript) {
+    throw new Error("Transcript is required before scoring.");
+  }
+
+  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
   const sourceName = input.video?.fileName ?? input.sourceUrl ?? input.episodeTitle;
   const now = Date.now();
 
@@ -22,12 +27,11 @@ export function runDeterministicClipCrew(input: RunInput): WorkflowStep[] {
       output: "Validated video metadata and created a seven-role clip plan.",
     },
     transcriber: {
-      input: input.sourceUrl
-        ? `Queued transcription from R2 video ${input.sourceUrl}.`
-        : "Queued transcription from selected R2 video.",
-      output: wordCount
-        ? `Prepared transcript with ${wordCount} words for scoring.`
-        : "Transcript is pending for this R2 video.",
+      input:
+        input.sourceType === "groq_transcript"
+          ? "Using Groq Whisper transcription from the uploaded media."
+          : "Using provided transcript as the source of truth.",
+      output: `Prepared transcript with ${wordCount} words for scoring.`,
     },
     moment_scorer: {
       input: "Transcript with hook, clarity, emotion, novelty, and shareability rubric.",

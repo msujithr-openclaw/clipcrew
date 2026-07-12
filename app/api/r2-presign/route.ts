@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const maxUploadBytes = 500 * 1024 * 1024;
+const maxUploadBytes = 2 * 1024 * 1024 * 1024;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
