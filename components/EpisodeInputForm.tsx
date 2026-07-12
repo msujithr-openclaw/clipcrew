@@ -361,6 +361,7 @@ function RunForm({
                   <video
                     className="aspect-video w-full rounded-2xl bg-zinc-100 object-cover"
                     muted
+                    preload="metadata"
                     src={video.publicUrl}
                   />
                   <p className="mt-3 font-black">{video.title}</p>
@@ -505,6 +506,7 @@ function RunForm({
                     <video
                       className="aspect-video w-full rounded-xl bg-zinc-100 object-cover"
                       muted
+                      preload="metadata"
                       src={video.publicUrl}
                     />
                     <span className="mt-2 block text-sm font-black">
