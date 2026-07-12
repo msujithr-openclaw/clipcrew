@@ -6,13 +6,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { ChangeEvent, FormEvent } from "react";
+import { formatDuration, runStatusLabel } from "@/lib/workflow/labels";
 import type { RunInput, VideoMetadata } from "@/lib/workflow/types";
 
 const hasConvexUrl = Boolean(process.env.NEXT_PUBLIC_CONVEX_URL);
-const tabs = ["Video Library", "Generate Clips"] as const;
+const tabs = ["Your Videos", "Create Clips"] as const;
 
 type Tab = (typeof tabs)[number];
 type StoredVideo = Doc<"videos">;
+type UploadState = "idle" | "uploading" | "done" | "error";
 type PendingUpload = {
   fileName: string;
   fileSize: number;
@@ -35,10 +37,11 @@ function SetupRequired() {
           Setup required
         </p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">
-          Connect Convex before using ClipCrew
+          App configuration required
         </h1>
         <p className="mt-4 text-sm leading-6 text-zinc-500">
-          `NEXT_PUBLIC_CONVEX_URL` is required to create and view runs.
+          `NEXT_PUBLIC_CONVEX_URL` is required before ClipCrew can store videos
+          and clip projects.
         </p>
       </div>
     </section>
@@ -64,7 +67,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(
-      () => reject(new Error("Convex run creation timed out")),
+      () => reject(new Error("Clip project creation timed out")),
       timeoutMs,
     );
   });
@@ -86,9 +89,8 @@ function RunForm({
   const router = useRouter();
   const addVideo = useMutation(api.runs.addVideo);
   const storedVideos = useQuery(api.runs.listVideos);
-  const [activeTab, setActiveTab] = useState<Tab>("Video Library");
-  const [title, setTitle] = useState("");
-  const [episodeTitle, setEpisodeTitle] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("Your Videos");
+  const [projectName, setProjectName] = useState("");
   const [selectedVideoId, setSelectedVideoId] = useState<Id<"videos"> | null>(
     null,
   );
@@ -98,10 +100,10 @@ function RunForm({
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState("Ready for R2 upload");
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const uploadToken = useRef(0);
+  const isUploading = uploadState === "uploading";
 
   const videos = useMemo(
     () =>
@@ -138,18 +140,15 @@ function RunForm({
   function selectVideo(video: StoredVideo) {
     setError("");
     setSelectedVideoId(video._id);
-    setTitle(video.title);
-    setEpisodeTitle(video.fileName.replace(/\.[^.]+$/, ""));
+    setProjectName(video.title);
     setPendingUpload(null);
-    setUploadStatus("R2 video selected");
-    setUploadProgress(100);
   }
 
   async function createRun(input: RunInput) {
     try {
       await onCreateRun(input);
     } catch {
-      setError("Could not create the Convex run.");
+      setError("Could not create the clip project. Try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -168,12 +167,10 @@ function RunForm({
     const name = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
     uploadToken.current = token;
     setError("");
-    setIsUploading(true);
+    setUploadState("uploading");
     setUploadProgress(0);
-    setUploadStatus("Uploading to R2...");
     setPendingUpload({ fileName: file.name, fileSize: file.size, previewUrl });
-    setTitle((current) => current || name);
-    setEpisodeTitle(name || file.name);
+    setProjectName(name || file.name);
 
     try {
       const [durationSeconds, uploaded] = await Promise.all([
@@ -186,7 +183,7 @@ function RunForm({
       }
 
       const video = {
-        title: title.trim() || name || file.name,
+        title: name || file.name,
         fileName: file.name,
         durationSeconds,
         sourceType: "r2_upload",
@@ -211,7 +208,7 @@ function RunForm({
       } satisfies StoredVideo;
       setLastUploadedVideo(storedVideo);
       setSelectedVideoId(videoId);
-      setUploadStatus("Uploaded to R2 and saved to library");
+      setUploadState("done");
       setUploadProgress(100);
       setPendingUpload(null);
     } catch {
@@ -219,12 +216,8 @@ function RunForm({
         return;
       }
 
-      setError("R2 upload failed. Fix storage configuration and upload again.");
-      setUploadStatus("R2 upload failed");
-    } finally {
-      if (uploadToken.current === token) {
-        setIsUploading(false);
-      }
+      setError("Upload failed. Check your connection and try again.");
+      setUploadState("error");
     }
   }
 
@@ -234,20 +227,22 @@ function RunForm({
     setIsSubmitting(true);
 
     if (!selectedVideo || !selectedVideoId) {
-      setError("Upload or select an R2 video first.");
+      setError("Select a video first.");
       setIsSubmitting(false);
       return;
     }
 
     if (isUploading) {
-      setError("Wait for the R2 upload to finish before generating clips.");
+      setError("Wait for the upload to finish before generating clips.");
       setIsSubmitting(false);
       return;
     }
 
+    const name = projectName.trim() || selectedVideo.title;
+
     await createRun({
-      title: title.trim() || selectedVideo.title,
-      episodeTitle: episodeTitle.trim() || selectedVideo.fileName,
+      title: name,
+      episodeTitle: name,
       sourceType: "r2_video",
       sourceUrl: selectedVideo.publicUrl,
       videoId: selectedVideoId,
@@ -281,20 +276,18 @@ function RunForm({
       </aside>
 
       <div className="flex-1 bg-white">
-        {activeTab === "Video Library" ? (
+        {activeTab === "Your Videos" ? (
           <section className="min-h-screen bg-white p-5 sm:p-7">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-                  Video Library
-                </p>
-                <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">
-                  R2 video gallery
-                </h1>
-              </div>
-              <span className="rounded-full bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
-                Convex + R2
-              </span>
+            <div>
+              <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
+                Video Library
+              </p>
+              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-5xl">
+                Your videos
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+                Upload a podcast episode to get started.
+              </p>
             </div>
 
             <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_340px]">
@@ -303,10 +296,10 @@ function RunForm({
                   <span>
                     <span className="block text-4xl font-black text-zinc-950">+</span>
                     <span className="mt-3 block text-sm font-black">
-                      Add video
+                      Upload episode
                     </span>
                     <span className="mt-1 block text-sm text-zinc-500">
-                      Uploads to R2 and saves to Convex.
+                      MP4, MOV, or audio files.
                     </span>
                   </span>
                   <input
@@ -326,7 +319,7 @@ function RunForm({
                     />
                     <p className="mt-3 font-black">{pendingUpload.fileName}</p>
                     <p className="mt-2 text-sm opacity-70">
-                      {Math.round(pendingUpload.fileSize / 1024 / 1024)} MB
+                      {formatFileSize(pendingUpload.fileSize)}
                     </p>
                   </div>
                 ) : null}
@@ -335,6 +328,19 @@ function RunForm({
                   <p className="rounded-3xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
                     Loading videos...
                   </p>
+                ) : null}
+
+                {storedVideos !== undefined &&
+                videos.length === 0 &&
+                !pendingUpload ? (
+                  <div className="grid min-h-56 place-items-center rounded-3xl border border-zinc-200 bg-white p-5 text-center">
+                    <div>
+                      <p className="text-sm font-black">No videos yet</p>
+                      <p className="mt-1 text-sm text-zinc-500">
+                        Upload your first episode to start making clips.
+                      </p>
+                    </div>
+                  </div>
                 ) : null}
 
                 {videos.map((video) => {
@@ -361,7 +367,10 @@ function RunForm({
                       </span>
                       <span className="mt-3 block font-black">{video.title}</span>
                       <span className="mt-2 block text-sm opacity-70">
-                        {video.fileName} · {Math.round(video.durationSeconds / 60)} min
+                        {formatDuration(video.durationSeconds)}
+                        {video.fileName !== video.title
+                          ? ` · ${video.fileName}`
+                          : ""}
                       </span>
                     </button>
                   );
@@ -386,130 +395,152 @@ function RunForm({
                   </div>
                 )}
                 <p className="mt-4 font-bold">
-                  {selectedVideo?.title ?? pendingUpload?.fileName ?? "Add a video"}
+                  {selectedVideo?.title ??
+                    pendingUpload?.fileName ??
+                    "Upload an episode"}
                 </p>
-                <p className="mt-1 break-all text-sm text-zinc-400">
-                  {selectedVideo?.publicUrl ?? "Upload a video to store it in R2"}
-                </p>
-                <div className="mt-4 border-t border-white/10 pt-4">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="font-semibold">Upload status</span>
-                    <span className="text-zinc-400">{uploadProgress}%</span>
-                  </div>
-                  <p className="mt-2 break-all text-sm text-zinc-400">
-                    {uploadStatus}
+                {selectedVideo ? (
+                  <p className="mt-1 text-sm text-zinc-400">
+                    {formatDuration(selectedVideo.durationSeconds)}
+                    {selectedVideo.fileSize
+                      ? ` · ${formatFileSize(selectedVideo.fileSize)}`
+                      : ""}
+                    {" · "}
+                    {new Date(selectedVideo.createdAt).toLocaleDateString()}
                   </p>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-white transition-all"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
+                ) : (
+                  <p className="mt-1 text-sm text-zinc-400">
+                    Your episodes stay in your library, ready for clips.
+                  </p>
+                )}
+
+                {uploadState !== "idle" ? (
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="font-semibold">
+                        {uploadState === "uploading"
+                          ? "Uploading..."
+                          : uploadState === "done"
+                            ? "Upload complete"
+                            : "Upload failed"}
+                      </span>
+                      {uploadState === "uploading" ? (
+                        <span className="text-zinc-400">{uploadProgress}%</span>
+                      ) : null}
+                    </div>
+                    {uploadState === "error" ? (
+                      <p className="mt-2 text-sm text-zinc-400">
+                        Check your connection and try again.
+                      </p>
+                    ) : null}
+                    {uploadState !== "error" ? (
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-white transition-all"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                </div>
+                ) : null}
+
+                {selectedVideo && !isUploading ? (
+                  <button
+                    className="mt-4 w-full rounded-2xl bg-white px-4 py-3 text-sm font-black text-zinc-950 transition hover:bg-zinc-200"
+                    onClick={() => setActiveTab("Create Clips")}
+                    type="button"
+                  >
+                    Create clips from this video
+                  </button>
+                ) : null}
               </div>
             </div>
             {error ? <p className="mt-4 text-sm text-amber-700">{error}</p> : null}
           </section>
         ) : null}
 
-        {activeTab === "Generate Clips" ? (
+        {activeTab === "Create Clips" ? (
           <form
             className="min-h-screen bg-white p-5 sm:p-7"
             onSubmit={handleSubmit}
           >
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-zinc-400">
-              Video -&gt; Job -&gt; Review -&gt; Export
+              Create Clips
             </p>
             <h1 className="mt-2 text-3xl font-black tracking-tight">
-              {selectedVideo
-                ? "Create a clip-generation job"
-                : "Select an R2 video to start"}
+              {selectedVideo ? "Create a clip project" : "Select a video to start"}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
-              Select a stored R2 video, create or open a job, review suggested
-              clips, then export approved clips.
+              We&apos;ll transcribe the episode, find the best moments, and
+              prepare short clips for your review.
             </p>
-
-            <div className="mt-6 grid gap-3 md:grid-cols-4">
-              <div
-                className={`rounded-2xl border p-4 ${
-                  selectedVideo
-                    ? "border-emerald-200 bg-emerald-50"
-                    : "border-zinc-200 bg-zinc-50"
-                }`}
-              >
-                <p className="text-sm font-black">1 Video</p>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {selectedVideo ? "R2 video selected" : "Choose a stored video"}
-                </p>
-              </div>
-              <div
-                className={`rounded-2xl border p-4 ${
-                  selectedVideo
-                    ? "border-zinc-950 bg-white"
-                    : "border-zinc-200 bg-zinc-50"
-                }`}
-              >
-                <p className="text-sm font-black">2 Job</p>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {isSubmitting ? "Creating Convex run" : "Create or open a job"}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                <p className="text-sm font-black">3 Review</p>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Approve suggested clips
-                </p>
-              </div>
-              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                <p className="text-sm font-black">4 Export</p>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Generate approved clips
-                </p>
-              </div>
-            </div>
 
             <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_360px]">
               <div className="space-y-4">
                 {selectedVideo ? (
                   <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
                     <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
-                      1. Video
+                      Selected video
                     </p>
+                    <video
+                      className="mt-3 aspect-video w-full max-w-md rounded-2xl bg-black object-cover"
+                      muted
+                      src={selectedVideo.publicUrl}
+                    />
                     <p className="mt-3 text-xl font-black">{selectedVideo.title}</p>
-                    <p className="mt-1 break-all text-sm text-zinc-500">
-                      {selectedVideo.fileName}
-                    </p>
-                    <p className="mt-3 text-sm text-zinc-500">
-                      Stored in R2 and ready for job creation.
+                    <p className="mt-1 text-sm text-zinc-500">
+                      {formatDuration(selectedVideo.durationSeconds)}
                     </p>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
+                    <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
+                      Selected video
+                    </p>
+                    <p className="mt-3 text-sm text-zinc-500">
+                      Pick an episode from your library first.
+                    </p>
+                    <button
+                      className="mt-4 rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-black text-zinc-950 transition hover:border-zinc-500"
+                      onClick={() => setActiveTab("Your Videos")}
+                      type="button"
+                    >
+                      Go to your videos
+                    </button>
+                  </div>
+                )}
 
                 <div className="rounded-3xl border border-zinc-200 bg-white p-4">
                   <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
-                    Existing jobs for this video
+                    Clip projects for this video
                   </p>
                   <div className="mt-4 grid gap-3">
                     {selectedVideoRuns === undefined && selectedVideoId ? (
-                      <p className="text-sm text-zinc-500">Loading jobs...</p>
+                      <p className="text-sm text-zinc-500">Loading projects...</p>
                     ) : null}
                     {selectedVideoRuns?.length === 0 ? (
                       <p className="text-sm text-zinc-500">
-                        No jobs yet for this video.
+                        No clip projects yet for this video.
                       </p>
                     ) : null}
                     {selectedVideoRuns?.map((run) => (
                       <button
-                        className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white"
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white"
                         key={run._id}
                         onClick={() => router.push(`/runs/${run._id}`)}
                         type="button"
                       >
-                        <span className="block font-black">{run.episodeTitle}</span>
-                        <span className="mt-1 block text-sm text-zinc-500">
-                          Open workflow · {run.status} ·{" "}
-                          {new Date(run.createdAt).toLocaleString()}
+                        <span>
+                          <span className="block font-black">
+                            {run.episodeTitle}
+                          </span>
+                          <span className="mt-1 block text-sm text-zinc-500">
+                            {runStatusLabel(run.status)} ·{" "}
+                            {new Date(run.createdAt).toLocaleString()}
+                          </span>
+                        </span>
+                        <span className="rounded-full bg-zinc-950 px-4 py-2 text-xs font-bold text-white">
+                          Open
                         </span>
                       </button>
                     ))}
@@ -519,34 +550,23 @@ function RunForm({
 
               <div className="rounded-3xl border border-zinc-200 bg-white p-4">
                 <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">
-                  2. Create job
+                  New clip project
                 </p>
                 <div className="mt-4 grid gap-4">
                   <label className="block space-y-2">
                     <span className="text-sm font-semibold text-zinc-700">
-                      Show or creator title
+                      Clip project name
                     </span>
                     <input
                       className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 outline-none transition focus:border-zinc-950 focus:bg-white"
-                      onChange={(event) => setTitle(event.target.value)}
-                      value={title}
-                    />
-                  </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-sm font-semibold text-zinc-700">
-                      Job or episode title
-                    </span>
-                    <input
-                      className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 outline-none transition focus:border-zinc-950 focus:bg-white"
-                      onChange={(event) => setEpisodeTitle(event.target.value)}
-                      value={episodeTitle}
+                      onChange={(event) => setProjectName(event.target.value)}
+                      value={projectName}
                     />
                   </label>
 
                   <p className="text-sm leading-6 text-zinc-500">
-                    This creates a Convex run for the selected video and opens the
-                    job page for review and export.
+                    You&apos;ll review every suggested clip before anything is
+                    exported.
                   </p>
                   <button
                     className="rounded-2xl bg-zinc-950 px-5 py-4 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
@@ -556,8 +576,8 @@ function RunForm({
                     {isUploading
                       ? "Uploading video..."
                       : isSubmitting
-                        ? "Creating job..."
-                        : "Create job & open workflow"}
+                        ? "Creating project..."
+                        : "Generate clips"}
                   </button>
                 </div>
               </div>
@@ -569,6 +589,10 @@ function RunForm({
       </div>
     </div>
   );
+}
+
+function formatFileSize(bytes: number) {
+  return `${Math.max(1, Math.round(bytes / 1024 / 1024))} MB`;
 }
 
 async function uploadVideoToR2(
@@ -586,7 +610,7 @@ async function uploadVideoToR2(
   });
 
   if (!presignResponse.ok) {
-    throw new Error("Could not create R2 upload URL");
+    throw new Error("Could not create upload URL");
   }
 
   const presign = (await presignResponse.json()) as {
@@ -604,7 +628,7 @@ async function uploadVideoToR2(
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     };
-    request.onerror = () => reject(new Error("R2 upload failed"));
+    request.onerror = () => reject(new Error("Upload failed"));
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) {
         onProgress(100);
@@ -612,7 +636,7 @@ async function uploadVideoToR2(
         return;
       }
 
-      reject(new Error("R2 upload failed"));
+      reject(new Error("Upload failed"));
     };
     request.send(file);
   });

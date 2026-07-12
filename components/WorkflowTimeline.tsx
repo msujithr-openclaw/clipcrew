@@ -8,6 +8,12 @@ export type TimelineStep = {
   outputSummary: string;
 };
 
+const stepStatusStyles: Record<string, string> = {
+  completed: "bg-emerald-50 text-emerald-700",
+  running: "bg-blue-50 text-blue-700",
+  failed: "bg-rose-50 text-rose-700",
+};
+
 export function WorkflowTimeline({ steps }: { steps: TimelineStep[] }) {
   return (
     <ol className="mt-4 space-y-3">
@@ -28,7 +34,11 @@ export function WorkflowTimeline({ steps }: { steps: TimelineStep[] }) {
                   {workflowRoleLabel(step.role)}
                 </h2>
               </div>
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] ${
+                  stepStatusStyles[step.status] ?? "bg-zinc-100 text-zinc-600"
+                }`}
+              >
                 {step.status}
               </span>
             </div>
